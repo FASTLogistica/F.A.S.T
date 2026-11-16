@@ -1751,15 +1751,7 @@ function ivBuildHeatmap(data) {
         </button>`;
     }
   }
-  html += '</div>';
-  container.innerHTML = html;
-  const titleEl = document.getElementById('hm-title');
-  if (titleEl) titleEl.textContent = `Rua ${rua} — mapa de posições`;
-  const footRua = document.getElementById('foot-rua');
-  if (footRua) footRua.textContent = rua;
-  const footCount = document.getElementById('foot-count');
-  if (footCount) footCount.textContent = levelsToShow.length * racks;
-}
+
   html += '</div>';
   container.innerHTML = html;
   const titleEl = document.getElementById('hm-title');
