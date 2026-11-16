@@ -1533,27 +1533,69 @@ var IV_RACKS   = 20;
 var IV_MAX_CAP = 800;
 var ivCurrentRua   = '1';
 var ivCurrentNivel = 'all';
+
+function ivNormalizeCellId(raw) {
+  const m = String(raw || '').toUpperCase().match(/R(\d+)-N(\d+)-P(\d+)/);
+  if (!m) return '';
+  return `R${Number(m[1])}-N${Number(m[2])}-P${Number(m[3])}`;
+}
+
 // allRuasData guarda os dados de todas as ruas (não regenera ao trocar)
 function ivGetRuaData(rua) {
-  if (!allRuasData[rua]) allRuasData[rua] = ivSeed(rua);
-  return allRuasData[rua];
+  const rKey = String(Number(rua) || 1);
+  if (!allRuasData[rKey]) allRuasData[rKey] = ivSeed(rKey);
+  return allRuasData[rKey];
 }
 var ivMatrixData = ivGetRuaData('1');
-// positionProducts[cellId] = { id, name }
-// activeTab
 var ivActiveTab = 'mapa';
-// cell modal state
 var cmCurrentCell = null;
 var cmSelectedProduct = null;
 
-// Atualiza qty de uma célula pelo cellId (ex: "R1-N2-P5")
+// Atualiza qty de uma célula pelo cellId (ex: "R1-N2-P5" ou "R1-N2-P05")
 function ivSetCellQty(cellId, qty) {
-  const m = cellId.match(/R(\d+)-N(\d+)-P(\d+)/);
+  const m = String(cellId || '').toUpperCase().match(/R(\d+)-N(\d+)-P(\d+)/);
   if (!m) return;
-  const [, rua, nivel, predio] = m;
+  const rua = String(Number(m[1]));
+  const nivel = Number(m[2]);
+  const predio = Number(m[3]);
   const data = ivGetRuaData(rua);
-  data[nivel][predio] = qty;
-  if (rua === ivCurrentRua) ivMatrixData = data;
+  if (data[nivel] && predio >= 1 && predio <= IV_RACKS) {
+    data[nivel][predio] = Math.max(0, Number(qty) || 0);
+  }
+  if (rua === String(ivCurrentRua)) ivMatrixData = data;
+}
+
+// Sincroniza produtos e saldos reais de db.products com o Mapa FEFO
+function ivSyncFromProducts() {
+  if (!Array.isArray(db?.products)) return;
+
+  // Normaliza chaves antigas (ex.: R1-N1-P02 -> R1-N1-P2)
+  Object.keys(positionProducts).forEach(rawKey => {
+    const norm = ivNormalizeCellId(rawKey);
+    if (norm && norm !== rawKey) {
+      positionProducts[norm] = positionProducts[rawKey];
+      delete positionProducts[rawKey];
+    }
+  });
+
+  // Vincula todos os produtos que possuem posição física R#-N#-P#
+  db.products.forEach(prod => {
+    const cellId = ivNormalizeCellId(prod.location);
+    if (!cellId) return;
+    positionProducts[cellId] = { id: prod.id, name: prod.name };
+    ivSetCellQty(cellId, Number(prod.qty) || 0);
+  });
+
+  // Atualiza quantidades das células já mapeadas
+  Object.entries(positionProducts).forEach(([cellId, mapped]) => {
+    const prod = db.products.find(p => p.id === mapped.id);
+    if (prod) {
+      mapped.name = prod.name;
+      ivSetCellQty(cellId, Number(prod.qty) || 0);
+    }
+  });
+
+  ivMatrixData = ivGetRuaData(ivCurrentRua);
 }
 
 function ivSwitchTab(tab) {
@@ -1602,7 +1644,9 @@ function ivBuildMetrics(data) {
   let total=0, filled=0, low=0, crit=0;
   for (let lv=1;lv<=IV_LEVELS;lv++) for (let rk=1;rk<=IV_RACKS;rk++) {
     const v = data[lv][rk];
-    total += v; if (v>0) filled++;
+    const cellId = `R${ivCurrentRua}-N${lv}-P${rk}`;
+    total += v;
+    if (v > 0 || positionProducts[cellId]) filled++;
     if (v>0 && v/IV_MAX_CAP<0.12) crit++;
     else if (v>0 && v/IV_MAX_CAP<0.25) low++;
   }
@@ -1686,7 +1730,6 @@ function ivOpenCellModal(cellId, val, lv, rk) {
   document.getElementById('cm-cell-id').textContent = 'POSIÇÃO · ' + cellId;
   document.getElementById('cm-pos').textContent = cellId;
   document.getElementById('cm-cap').textContent = val.toLocaleString('pt-BR') + ' un · ' + Math.round(val/IV_MAX_CAP*100) + '%';
-  // current product
   const cur = positionProducts[cellId];
   const wrap = document.getElementById('cm-current-wrap');
   if (cur) {
@@ -1694,11 +1737,9 @@ function ivOpenCellModal(cellId, val, lv, rk) {
     document.getElementById('cm-current-name').textContent = cur.name;
     document.getElementById('cm-current-sku').textContent = cur.id;
   } else { wrap.style.display = 'none'; }
-  // reset search & list
   document.getElementById('cm-search').value = '';
   ivCmFilter('');
   ivCmResetConfirm();
-  // open
   const ov = document.getElementById('cell-modal-overlay');
   ov.style.display = 'flex';
   ov.setAttribute('aria-hidden', 'false');
@@ -1736,14 +1777,12 @@ function ivCmFilter(q) {
 
 function ivCmSelectProd(skuId) {
   cmSelectedProduct = IV_CATALOG.find(p => p.id === skuId);
-  // visual selection
   document.querySelectorAll('#cm-product-list > button').forEach(el => {
     el.style.background = 'transparent'; el.classList.remove('selected');
   });
   const key = skuId.replace(/[^a-z0-9]/gi,'');
   const el = document.getElementById('cmprod-' + key);
   if (el) { el.style.background = 'var(--accent-dim)'; el.classList.add('selected'); }
-  // enable confirm
   const btn = document.getElementById('cm-confirm-btn');
   btn.style.opacity = '1'; btn.style.pointerEvents = 'auto'; btn.removeAttribute('disabled');
 }
@@ -1756,14 +1795,18 @@ function ivCmResetConfirm() {
 
 function ivConfirmAssign() {
   if (!cmSelectedProduct || !cmCurrentCell) return;
-  positionProducts[cmCurrentCell.cellId] = { id: cmSelectedProduct.id, name: cmSelectedProduct.name };
+  const cellId = cmCurrentCell.cellId;
+  positionProducts[cellId] = { id: cmSelectedProduct.id, name: cmSelectedProduct.name };
   const product = db.products.find(item => item.id === cmSelectedProduct.id);
-  if (product) product.location = cmCurrentCell.cellId;
+  if (product) {
+    product.location = cellId;
+    ivSetCellQty(cellId, Number(product.qty) || 0);
+  }
   ivCloseCellModal();
+  renderAll();
   ivBuildHeatmap(ivMatrixData);
   ivBuildMetrics(ivMatrixData);
-  saveState();
-  showToast(`${cmSelectedProduct.name} → ${cmCurrentCell.cellId}`);
+  showToast(`${cmSelectedProduct.name} → ${cellId}`);
 }
 
 function ivRemoveProduct() {
@@ -1771,14 +1814,15 @@ function ivRemoveProduct() {
   if (!window.confirm(`Remover o produto da posição ${cmCurrentCell.cellId}? O estoque do produto não será apagado.`)) return;
   const removed = positionProducts[cmCurrentCell.cellId];
   const removedPositionId = cmCurrentCell.cellId;
-  delete positionProducts[cmCurrentCell.cellId];
+  delete positionProducts[removedPositionId];
+  ivSetCellQty(removedPositionId, 0);
   const product = db.products.find(item => item.id === removed?.id);
-  if (product && product.location === cmCurrentCell.cellId) product.location = '';
+  if (product && ivNormalizeCellId(product.location) === removedPositionId) product.location = '';
   document.getElementById('cm-current-wrap').style.display = 'none';
   ivCloseCellModal();
+  renderAll();
   ivBuildHeatmap(ivMatrixData);
   ivBuildMetrics(ivMatrixData);
-  saveState();
   window.FAST_API?.removeRemotePosition?.(removedPositionId).catch(error => console.warn('Posição remota não removida.', error));
   showToast('Produto removido da posição');
 }
