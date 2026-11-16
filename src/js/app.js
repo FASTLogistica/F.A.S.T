@@ -32,6 +32,12 @@ var db = cloneData(window.FAST_DEMO_DB || { products: [], suppliers: [], recipes
 db.lots = FAST_CORE.migrateLots(db.products, db.lots);
 var positionProducts = {};
 var allRuasData = {};
+var IV_LEVELS      = 5;
+var IV_RACKS       = 20;
+var IV_MAX_CAP     = 800;
+var ivCurrentRua   = '1';
+var ivCurrentNivel = 'all';
+var ivMatrixData   = null;
 
 
 
@@ -1564,11 +1570,6 @@ var pageTitles = {
 };
 
 // ── HEATMAP MODULE ──
-var IV_LEVELS  = 5;
-var IV_RACKS   = 20;
-var IV_MAX_CAP = 800;
-var ivCurrentRua   = '1';
-var ivCurrentNivel = 'all';
 
 function ivNormalizeCellId(raw) {
   const m = String(raw || '').toUpperCase().match(/R(\d+)-N(\d+)-P(\d+)/);
@@ -1677,21 +1678,30 @@ function ivCellColor(val) {
 }
 
 function ivBuildMetrics(data) {
-  let total=0, filled=0, low=0, crit=0;
-  for (let lv=1;lv<=IV_LEVELS;lv++) for (let rk=1;rk<=IV_RACKS;rk++) {
-    const v = data[lv][rk];
-    const cellId = `R${ivCurrentRua}-N${lv}-P${rk}`;
-    total += v;
-    if (v > 0 || positionProducts[cellId]) filled++;
-    if (v>0 && v/IV_MAX_CAP<0.12) crit++;
-    else if (v>0 && v/IV_MAX_CAP<0.25) low++;
+  const levels = Number(IV_LEVELS) || 5;
+  const racks  = Number(IV_RACKS)  || 20;
+  const maxCap = Number(IV_MAX_CAP) || 800;
+  const rua    = String(ivCurrentRua || '1');
+  data = data || ivGetRuaData(rua);
+
+  let total = 0, filled = 0, low = 0, crit = 0;
+  for (let lv = 1; lv <= levels; lv++) {
+    const row = data[lv] || {};
+    for (let rk = 1; rk <= racks; rk++) {
+      const v = Number(row[rk]) || 0;
+      const cellId = `R${rua}-N${lv}-P${rk}`;
+      total += v;
+      if (v > 0 || positionProducts[cellId]) filled++;
+      if (v > 0 && v / maxCap < 0.12) crit++;
+      else if (v > 0 && v / maxCap < 0.25) low++;
+    }
   }
-  const withProd = Object.keys(positionProducts).filter(k => k.startsWith(`R${ivCurrentRua}-`)).length;
+  const withProd = Object.keys(positionProducts).filter(k => k.startsWith(`R${rua}-`)).length;
   const el = document.getElementById('iv-metrics');
   if (!el) return;
   el.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px"><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Unidades totais</div><div style="font-size:18px;font-weight:600;color:var(--text-primary);font-family:var(--mono);letter-spacing:-1px">${total.toLocaleString('pt-BR')}</div><div style="font-size:10px;margin-top:2px;color:#5dc97a">Rua ${ivCurrentRua}</div></div>
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px"><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Posições ocupadas</div><div style="font-size:18px;font-weight:600;color:var(--text-primary);font-family:var(--mono);letter-spacing:-1px">${filled}</div><div style="font-size:10px;margin-top:2px;color:var(--text-muted)">de ${IV_LEVELS*IV_RACKS}</div></div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px"><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Unidades totais</div><div style="font-size:18px;font-weight:600;color:var(--text-primary);font-family:var(--mono);letter-spacing:-1px">${total.toLocaleString('pt-BR')}</div><div style="font-size:10px;margin-top:2px;color:#5dc97a">Rua ${rua}</div></div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px"><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Posições ocupadas</div><div style="font-size:18px;font-weight:600;color:var(--text-primary);font-family:var(--mono);letter-spacing:-1px">${filled}</div><div style="font-size:10px;margin-top:2px;color:var(--text-muted)">de ${levels * racks}</div></div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px"><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Produtos mapeados</div><div style="font-size:18px;font-weight:600;color:#1B4965;font-family:var(--mono);letter-spacing:-1px">${withProd}</div><div style="font-size:10px;margin-top:2px;color:#5FA8D3">posições com produto</div></div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);padding:10px 12px"><div style="font-size:10px;color:var(--text-muted);margin-bottom:4px">Crítico</div><div style="font-size:18px;font-weight:600;color:var(--danger);font-family:var(--mono);letter-spacing:-1px">${crit}</div><div style="font-size:10px;margin-top:2px;color:var(--danger)">requer reposição</div></div>
   `;
@@ -1700,21 +1710,29 @@ function ivBuildMetrics(data) {
 function ivBuildHeatmap(data) {
   const container = document.getElementById('heatmap-container');
   if (!container) return;
-  const levelsToShow = ivCurrentNivel === 'all'
-    ? Array.from({length:IV_LEVELS},(_,i)=>i+1)
-    : [parseInt(ivCurrentNivel)];
+  const levels = Number(IV_LEVELS) || 5;
+  const racks  = Number(IV_RACKS)  || 20;
+  const maxCap = Number(IV_MAX_CAP) || 800;
+  const rua    = String(ivCurrentRua || '1');
+  const nivel  = ivCurrentNivel || 'all';
+  data = data || ivGetRuaData(rua);
 
-  let html = `<div class="iv-heatmap-grid" style="grid-template-columns:44px ${Array(IV_RACKS).fill('84px').join(' ')}">`;
+  const levelsToShow = nivel === 'all'
+    ? Array.from({length: levels}, (_, i) => i + 1)
+    : [parseInt(nivel, 10) || 1];
+
+  let html = `<div class="iv-heatmap-grid" style="grid-template-columns:44px ${Array(racks).fill('84px').join(' ')}">`;
   html += '<div class="iv-grid-corner"></div>';
-  for (let rk=1;rk<=IV_RACKS;rk++) html += `<div class="iv-col-label">P${rk}</div>`;
+  for (let rk = 1; rk <= racks; rk++) html += `<div class="iv-col-label">P${rk}</div>`;
 
   for (const lv of levelsToShow) {
+    const row = data[lv] || {};
     html += `<div class="iv-row-label">N${lv}</div>`;
-    for (let rk=1;rk<=IV_RACKS;rk++) {
-      const val = data[lv][rk];
-      let {bg,tc} = ivCellColor(val);
-      const pct = Math.round(val/IV_MAX_CAP*100);
-      const cellId = `R${ivCurrentRua}-N${lv}-P${rk}`;
+    for (let rk = 1; rk <= racks; rk++) {
+      const val = Number(row[rk]) || 0;
+      let {bg, tc} = ivCellColor(val);
+      const pct = Math.round(val / maxCap * 100);
+      const cellId = `R${rua}-N${lv}-P${rk}`;
       const prod = positionProducts[cellId];
       if (prod) { bg = 'rgba(190,233,232,.85)'; tc = '#1B4965'; }
       const prodLabel = prod
@@ -1725,14 +1743,23 @@ function ivBuildHeatmap(data) {
         : `${cellId}: ${val.toLocaleString('pt-BR')} un · ${pct}%`;
       html += `
         <button type="button" onclick="ivOpenCellModal('${cellId}',${val},${lv},${rk})" title="${escapeHtml(titleStr)}"
-          class="iv-cell${prod?' has-product':''}" style="--iv-cell-bg:${bg};--iv-cell-text:${tc};--iv-cell-border:${prod?'rgba(98,182,203,.7)':'transparent'}">
-          <span class="iv-cell-qty">${val===0?'—':val.toLocaleString('pt-BR')}</span>
-          ${val>0&&!prod?`<span class="iv-cell-percent">${pct}% ocupado</span>`:''}
+          class="iv-cell${prod ? ' has-product' : ''}" style="--iv-cell-bg:${bg};--iv-cell-text:${tc};--iv-cell-border:${prod ? 'rgba(98,182,203,.7)' : 'transparent'}">
+          <span class="iv-cell-qty">${val === 0 ? '—' : val.toLocaleString('pt-BR')}</span>
+          ${val > 0 && !prod ? `<span class="iv-cell-percent">${pct}% ocupado</span>` : ''}
           ${prodLabel}
-          ${prod?'<span class="iv-cell-dot" aria-hidden="true"></span>':''}
+          ${prod ? '<span class="iv-cell-dot" aria-hidden="true"></span>' : ''}
         </button>`;
     }
   }
+  html += '</div>';
+  container.innerHTML = html;
+  const titleEl = document.getElementById('hm-title');
+  if (titleEl) titleEl.textContent = `Rua ${rua} — mapa de posições`;
+  const footRua = document.getElementById('foot-rua');
+  if (footRua) footRua.textContent = rua;
+  const footCount = document.getElementById('foot-count');
+  if (footCount) footCount.textContent = levelsToShow.length * racks;
+}
   html += '</div>';
   container.innerHTML = html;
   const titleEl = document.getElementById('hm-title');
