@@ -1119,7 +1119,7 @@ function openLossForm() {
       {name:'sku', label:'Produto / lote', type:'select', value:db.products[0]?.id || '', required:true, options:db.products.map(p => ({value:p.id, label:`${p.id} — ${p.name} · ${p.lote || 'sem lote'}`}))},
       {name:'qty', label:'Quantidade perdida', type:'number', value:1, min:0, step:1, required:true},
       {name:'reason', label:'Motivo', type:'select', value:'Sobra de balcão', options:['Sobra de balcão','Vencimento','Erro de produção','Produto queimado','Quebra','Divergência de inventário','Outro']},
-      {name:'responsible', label:'Responsável', value:'Ana Martins'},
+      {name:'responsible', label:'Responsável', value:getOperatorProfile().name},
       {name:'note', label:'Observação', type:'textarea', placeholder:'Ex.: sobra da fornada da tarde'}
     ],
     onSubmit(values) {
@@ -1284,19 +1284,51 @@ function openHelpModal() {
   });
 }
 
+const PROFILE_STORAGE_KEY = 'fast_operator_profile_v1';
+
+function getOperatorProfile() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PROFILE_STORAGE_KEY) || 'null');
+    if (saved && saved.name) return saved;
+  } catch {}
+  return { name: 'Operador Demo', role: 'Administrador', unit: 'Padaria Três Irmãos', email: 'operador@padaria.local' };
+}
+
+function applyOperatorProfileUI() {
+  const p = getOperatorProfile();
+  const initials = p.name.trim().split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase() || '').join('') || 'OP';
+  const nameEl = document.getElementById('side-user-name');
+  const roleEl = document.getElementById('side-user-role');
+  const avatarEl = document.getElementById('side-user-avatar');
+  const btnEl = document.getElementById('side-user-btn');
+  if (nameEl) nameEl.textContent = p.name;
+  if (roleEl) roleEl.textContent = p.role;
+  if (avatarEl) avatarEl.textContent = initials;
+  if (btnEl) btnEl.setAttribute('aria-label', `Abrir perfil de ${p.name}`);
+}
+
 function openProfileModal() {
+  const current = getOperatorProfile();
   openFlowModal({
-    title:'Perfil do usuário',
-    subtitle:'Dados locais do operador nesta demonstração.',
-    submitLabel:'Salvar perfil',
-    fields:[
-      {name:'name', label:'Nome', value:'Ana Martins'},
-      {name:'role', label:'Cargo', value:'Administrador'},
-      {name:'unit', label:'Unidade', value:'Padaria Três Irmãos'},
-      {name:'email', label:'E-mail', value:'ana@padaria.local'}
+    title: 'Perfil do usuário',
+    subtitle: 'Dados locais do operador nesta demonstração.',
+    submitLabel: 'Salvar perfil',
+    fields: [
+      { name: 'name', label: 'Nome', value: current.name, required: true },
+      { name: 'role', label: 'Cargo', value: current.role },
+      { name: 'unit', label: 'Unidade', value: current.unit },
+      { name: 'email', label: 'E-mail', value: current.email }
     ],
     onSubmit(values) {
-      showToast(`✅ Perfil atualizado para ${values.name}`);
+      const updated = {
+        name: (values.name || '').trim() || 'Operador Demo',
+        role: (values.role || '').trim() || 'Administrador',
+        unit: (values.unit || '').trim() || 'Padaria Três Irmãos',
+        email: (values.email || '').trim() || 'operador@padaria.local'
+      };
+      localStorage.setItem(PROFILE_STORAGE_KEY, JSON.stringify(updated));
+      applyOperatorProfileUI();
+      showToast(`✅ Perfil atualizado para ${updated.name}`);
     }
   });
 }
@@ -1515,6 +1547,7 @@ loadState();
 isHydratingState = false;
 remoteStateReady = !isSupabaseMode();
 renderAll();
+applyOperatorProfileUI();
 bootstrapRemoteState();
 setTimeout(openCompanyOnboardingModal, 250);
 
