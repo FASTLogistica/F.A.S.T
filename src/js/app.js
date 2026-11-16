@@ -1899,7 +1899,8 @@ function ivLocateProduct(skuId) {
     posEl.innerHTML = `<div style="font-size:10px;color:var(--text-muted);letter-spacing:.5px;text-transform:uppercase;margin-bottom:6px">${positions.length} posição(ões) encontrada(s)</div>` +
       positions.map(pos => {
         const [,ruaPart,nivelPart,predioPart] = pos.match(/R(\d+)-N(\d+)-P(\d+)/)||[];
-        const val = ivMatrixData[nivelPart] ? (ivMatrixData[nivelPart][predioPart]||0) : 0;
+        const ruaData = ivGetRuaData(ruaPart); 
+        const val = ruaData[nivelPart] ? (ruaData[nivelPart][predioPart]||0) : 0;
         const pct = Math.round(val/IV_MAX_CAP*100);
         return `<button type="button" onclick="ivGoToPos('${pos}')" style="width:100%;font-family:var(--font);text-align:left;background:var(--accent-dim);border:1px solid rgba(98,182,203,.35);border-radius:var(--r);padding:10px 14px;cursor:pointer;display:flex;align-items:center;justify-content:space-between;transition:background-color .15s,border-color .15s,transform .15s"
           onmouseover="this.style.background='#CAE9FF'" onmouseout="this.style.background='var(--accent-dim)'">
