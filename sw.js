@@ -1,4 +1,4 @@
-const CACHE_NAME = 'fast-app-shell-v8';
+const CACHE_NAME = 'fast-app-shell-v9';
 const APP_SHELL = [
   './',
   './index.html',
@@ -35,7 +35,10 @@ self.addEventListener('fetch', event => {
   event.respondWith(
     fetch(request)
       .then(response => {
-        if (response.ok) caches.open(CACHE_NAME).then(cache => cache.put(request.mode === 'navigate' ? './index.html' : request, response.clone()));
+        if (response.ok) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(request.mode === 'navigate' ? './index.html' : request, responseClone));
+        }
         return response;
       })
       .catch(() => caches.match(request.mode === 'navigate' ? './index.html' : request))
