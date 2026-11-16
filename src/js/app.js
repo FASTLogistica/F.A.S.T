@@ -628,6 +628,9 @@ function renderAll() {
   renderLosses();
   renderAudit(document.getElementById('audit-search')?.value || '');
   syncCatalog();
+  ivSyncFromProducts();
+  ivBuildMetrics(ivMatrixData);
+  ivBuildHeatmap(ivMatrixData);
   renderConnectionStatus();
   // atualiza badge da sidebar
   const badge = document.querySelector('.nav-item[data-page="pedidos"] .nav-count');
